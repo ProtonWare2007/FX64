@@ -1,4 +1,4 @@
 build:
-	gcc ./chip8_emu.c -lSDL3 -O3 -o ./chip8_emu
+	gcc ./FX64.c -lSDL3 -O3 -o ./FX64
 run:
-	./chip8_emu $(FILE)
+	./FX64 $(FILE)

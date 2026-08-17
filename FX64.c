@@ -40,10 +40,19 @@ uint16_t IReg;
 uint16_t PC = 0x200;
 uint8_t DelayTMR;
 uint8_t SoundTMR;
-double emuTimer;
+double emuTimer, emuSound;
 
 bool isRunning = true;
+bool startedSound = false;
 uint8_t scale = 14;
+uint8_t AudioBuffer[440 * 4];
+
+void fillBuffer() {
+    for(uint32_t i = 0; i < 220;i++) {
+        if(i % 2 == 0) AudioBuffer[i] = 0x00;
+        else AudioBuffer[i] = 0xFF;
+    }
+}
 
 SDL_Surface* buffer;
 
@@ -134,7 +143,7 @@ void execAluOperation(uint16_t Opcode) {
     }
 }
 
-uint8_t convertKey(uint8_t keyCode) {
+uint8_t convertKey(SDL_Scancode keyCode) {
     switch (keyCode) {
         case SDL_SCANCODE_1:
             return 0x01;
@@ -286,7 +295,7 @@ void execEOpcodes(uint16_t Opcode) {
     }
 }
 
-void execute() {
+void execute(SDL_AudioStream* stream, SDL_AudioSpec audioSpec) {
     uint16_t Opcode = 0x0000;
     uint16_t MSN;
     double now = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
@@ -294,10 +303,14 @@ void execute() {
         emuTimer = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
         --DelayTMR;
     }
-    if (SoundTMR > 0 && (now - emuTimer) * 60 >= 1.0) {
-        emuTimer = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
-        //Beep
+    if (SoundTMR > 0 && (now - emuSound) * 60 >= 1.0) {
+        emuSound = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+        if(!startedSound) {
+            SDL_PutAudioStreamData(stream, AudioBuffer, audioSpec.freq * SoundTMR / 60);
+            startedSound = true;
+        }
         --SoundTMR;
+        if(!SoundTMR) startedSound = false;
     }
     if (PC < 0x1000) {
         Opcode = (Ram[PC] << 8) + Ram[PC+1];
@@ -364,13 +377,17 @@ void execute() {
 
 void start() {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
-    SDL_Window* win =  SDL_CreateWindow("CHIP-8 Emulator", 64*scale, 32*scale, 0);
+    SDL_Window* win =  SDL_CreateWindow("FX64 CHIP-8 Emulator", 64*scale, 32*scale, 0);
     SDL_Surface* win_surf = SDL_GetWindowSurface(win);
+    SDL_AudioSpec audioSpec = {.format = SDL_AUDIO_U8, .channels = 1, .freq = 440};
+    SDL_AudioStream* stream =  SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audioSpec, NULL, NULL);
+    SDL_ResumeAudioStreamDevice(stream);
     buffer = SDL_CreateSurface(64, 32, SDL_PIXELFORMAT_RGB24);
     SDL_Surface* scaledBuffer;
     SDL_Event event;
     uint8_t colorValue;
     emuTimer = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+    emuSound = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
     while (isRunning) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) goto Quit;
@@ -382,9 +399,8 @@ void start() {
                 if(key != 0xFF) keyPad[key] = false;
             }
         }
-        execute();
+        execute(stream, audioSpec);
         scaledBuffer = SDL_ScaleSurface(buffer, 64 * scale, 32 * scale, SDL_SCALEMODE_NEAREST);
-        //SDL_BlitSurfaceScaled(buffer, NULL, win_surf, NULL, SDL_SCALEMODE_NEAREST); Slow!!!
         SDL_BlitSurface(scaledBuffer, NULL, win_surf, NULL);
         SDL_DestroySurface(scaledBuffer);
         SDL_UpdateWindowSurface(win);
@@ -402,6 +418,7 @@ void loadFont() {
 
 int main(int argc, char** argv) {
     srand(time(NULL));
+    fillBuffer();
     if(argc == 2)
     {
         readFile(argv[1]);
